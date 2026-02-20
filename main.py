@@ -1,56 +1,35 @@
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from aiogram import Bot, Dispatcher, executor, types
 from datetime import date
-
-from config import BOT_TOKEN, ADMIN_ID, TARGET_DATE
-from storage import get_data, update_phrase, add_user
+from config import BOT_TOKEN, TARGET_DATE, ADMIN_ID
+from db import can_send, users_count
 from ai import generate_phrase
 
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher(bot)
 
 def days_left():
     target = date(*TARGET_DATE)
     return (target - date.today()).days
 
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    add_user(user_id)
-
-    data = get_data()
-    today = str(date.today())
-
-    d_left = days_left()
-
-    if data["phrase_date"] != today:
-        phrase = generate_phrase(d_left)
-        update_phrase(phrase)
-    else:
-        phrase = data["phrase_text"]
-
-    await update.message.reply_text(
-        f"⏳ Осталось дней: {d_left}\n\n{phrase}"
-    )
-
-
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+@dp.message_handler(commands=["start"])
+async def start(message: types.Message):
+    if not can_send(message.from_user.id):
+        await message.answer("Сегодня ты уже получал фразу 🙂")
         return
 
-    data = get_data()
-    await update.message.reply_text(
-        f"👤 Пользователей: {len(data['users'])}\n"
-        f"🗓 Фраза от: {data['phrase_date']}"
+    days = days_left()
+    phrase = generate_phrase(days)
+
+    await message.answer(
+        f"До лета осталось {days} дней.\n\n{phrase}"
     )
 
+@dp.message_handler(commands=["stats"])
+async def stats(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
 
-def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("stats", stats))
-
-    app.run_polling()
-
+    await message.answer(f"👤 Пользователей: {users_count()}")
 
 if __name__ == "__main__":
-    main()
+    executor.start_polling(dp, skip_updates=True)
